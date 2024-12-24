@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 class="text-center mb-4">Manage Sessions</h2>
+
+    <!-- Button to open Add Session Modal -->
+    <div class="text-end mb-4">
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addSessionModal">Add New Session</button>
+    </div>
+
+    <!-- Table of Sessions -->
+    <div class="table-responsive">
+        <table class="table table-striped table-bordered">
+            <thead class="table-dark">
+                <tr>
+                    <th>#</th>
+                    <th>Attraction</th>
+                    <th>Start Time</th>
+                    <th>Duration</th>
+                    <th>Available Spots</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for session in sessions %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>{{ session.attraction.name }}</td>
+                        <td>{{ session.start_time }}</td>
+                        <td>{{ session.duration }}</td>
+                        <td>{{ session.available_spots }}</td>
+                        <td>
+                            <button 
+                                class="btn btn-warning btn-sm"
+                                data-bs-toggle="modal" 
+                                data-bs-target="#editSessionModal" 
+                                data-id="{{ session.id }}" 
+                                data-attraction="{{ session.attraction.id }}" 
+                                data-start_time="{{ session.start_time }}" 
+                                data-duration="{{ session.duration }}" 
+                                data-available_spots="{{ session.available_spots }}">
+                                Edit
+                            </button>
+                            <button 
+                                class="btn btn-danger btn-sm"
+                                onclick="confirmDeleteSession({{ session.id }})">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Session Modal -->
+<div class="modal fade" id="addSessionModal" tabindex="-1" aria-labelledby="addSessionModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addSessionModalLabel">Add New Session</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="addSessionForm" method="POST">
+                    <div class="mb-3">
+                        <label for="attraction" class="form-label">Attraction</label>
+                        <select id="attraction" name="attraction_id" class="form-select" required>
+                            {% for attraction in attractions %}
+                                <option value="{{ attraction.id }}">{{ attraction.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="start_time" class="form-label">Start Time</label>
+                        <input type="datetime-local" class="form-control" id="start_time" name="start_time" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="duration" class="form-label">Duration</label>
+                        <input type="number" class="form-control" id="duration" name="duration" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="available_spots" class="form-label">Available Spots</label>
+                        <input type="number" class="form-control" id="available_spots" name="available_spots" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Add Session</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Session Modal -->
+<div class="modal fade" id="editSessionModal" tabindex="-1" aria-labelledby="editSessionModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editSessionModalLabel">Edit Session</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editSessionForm" method="POST">
+                    <input type="hidden" id="edit-session-id" name="id">
+                    <div class="mb-3">
+                        <label for="edit-attraction" class="form-label">Attraction</label>
+                        <select id="edit-attraction" name="attraction_id" class="form-select" required>
+                            {% for attraction in attractions %}
+                                <option value="{{ attraction.id }}">{{ attraction.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-start_time" class="form-label">Start Time</label>
+                        <input type="datetime-local" class="form-control" id="edit-start_time" name="start_time" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-duration" class="form-label">Duration</label>
+                        <input type="number" class="form-control" id="edit-duration" name="duration" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-available_spots" class="form-label">Available Spots</label>
+                        <input type="number" class="form-control" id="edit-available_spots" name="available_spots" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Save Changes</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- JavaScript for Sessions -->
+<script>
+    window.onload = function() {
+        var eSelect = document.getElementById('attraction');
+        eSelect.onchange = function() {
+            fetch(`/admin/attractions/${eSelect.value}`, { method: 'GET' })
+                .then(response => response.json())
+                .then(data => {
+                        console.log('log msg resp max seats');
+                        console.log(data.name);
+                        document.getElementById('available_spots').value = data.max_seats;
+                });
+        }
+    }
+
+    function confirmDeleteSession(sessionId) {
+        if (confirm("Are you sure you want to delete this session?")) {
+            fetch(`/admin/sessions/${sessionId}`, { method: 'DELETE' })
+                .then(response => {
+                    if (response.ok) {
+                        location.reload();
+                    } else {
+                        alert("Error deleting session.");
+                    }
+                });
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        // Заповнення форми редагування
+        const editModal = document.getElementById('editSessionModal');
+        editModal.addEventListener('show.bs.modal', (event) => {
+            const button = event.relatedTarget;
+            const id = button.getAttribute('data-id');
+            const attraction = button.getAttribute('data-attraction');
+            const startTime = button.getAttribute('data-start_time');
+            const duration = button.getAttribute('data-duration');
+            const availableSpots = button.getAttribute('data-available_spots');
+
+            document.getElementById('edit-session-id').value = id;
+            document.getElementById('edit-attraction').value = attraction;
+            document.getElementById('edit-start_time').value = startTime;
+            document.getElementById('edit-duration').value = duration;
+            document.getElementById('edit-available_spots').value = availableSpots;
+        });
+
+        // Додавання сесії
+        document.getElementById('addSessionForm').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const form = event.target;
+            fetch('/admin/sessions', {
+                method: 'POST',
+                body: new FormData(form),
+            }).then(response => {
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Error adding session.');
+                }
+            });
+        });
+
+        // Редагування сесії
+        document.getElementById('editSessionForm').addEventListener('submit', (event) => {
+            event.preventDefault();
+            const form = event.target;
+            const id = document.getElementById('edit-session-id').value;
+            fetch(`/admin/sessions/${id}`, {
+                method: 'PUT',
+                body: new FormData(form),
+            }).then(response => {
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    alert('Error updating session.');
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}
