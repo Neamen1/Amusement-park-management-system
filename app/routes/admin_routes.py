@@ -1,6 +1,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify,current_app
 from flask_login import login_required, current_user
 from ..models import db, Attractions, Sessions
+from .query_server import query_cpp_server
 
 bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -30,8 +31,21 @@ def manage_attractions():
         db.session.commit()
         flash('Attraction added successfully!')
         return '', 200
+    
+    search_query = request.args.get('search', '').strip()
+    
     page = request.args.get('page', 1, type=int)
-    attractions = Attractions.query.paginate(page=page, per_page=current_app.config["ATTRACTIONS_PER_PAGE"], error_out=False).items
+    if search_query:
+        # Звернення до сервера на C++ для пошуку
+        status, response = query_cpp_server(search_query)
+        if status != 200:
+            return jsonify({'error': response}), 400
+    
+        attractions = Attractions.query.filter(Attractions.id.in_(response)).paginate(page=page,per_page=current_app.config["ATTRACTIONS_PER_PAGE"],error_out=False
+        ).items
+    else:
+        attractions = Attractions.query.paginate(page=page, per_page=current_app.config["ATTRACTIONS_PER_PAGE"], error_out=False).items
+
 
     return render_template(
         'admin/manage_attractions.html',
