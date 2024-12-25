@@ -3,7 +3,14 @@
 {% block content %}
 <div class="container">
     <h2 class="text-center mb-4">Manage Attractions</h2>
-
+    
+    <form method="GET" action="{{ url_for('admin.manage_attractions') }}" class="mb-4">
+        <div class="input-group">
+            <input type="text" class="form-control" name="search" placeholder="Search for attractions..." value="{{ request.args.get('search', '') }}">
+            <button class="btn btn-primary" type="submit">Search</button>
+        </div>
+    </form>
+    
     <!-- Button to open Add Attraction Modal -->
     <div class="text-end mb-4">
         <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addAttractionModal">Add New Attraction</button>
