@@ -1,6 +1,9 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import socket
+import re
+
+#host=localhost dbname=amusement_database port=5432 user=admin password=1221
 
 def send_request(host, port, message):
     try:
@@ -45,6 +48,17 @@ def on_add_file():
         response = send_request(entry_host.get(), int(entry_port.get()), f"ADD_FILE {file_path}\n")
         append_response(f"ADD_FILE Response:\n{response}\n\n")
 
+def on_add_directories():
+    dir_path = filedialog.askdirectory()
+    num_threads = entry_param.get()
+
+    # Validate the input format
+    if not re.fullmatch(r"\d+", num_threads):
+        messagebox.showwarning("Invalid Input", "Input must be in the format 'numThreads', where first is a non-negative integer")
+        return
+    response = send_request(entry_host.get(), int(entry_port.get()), f"addDocsFromDirectory {num_threads},{dir_path}\n")
+    append_response(f"addDocsFromDirectory Response:\n{response}\n\n")
+
 def on_save_index():
     file_path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
     if file_path:
@@ -56,6 +70,8 @@ def on_load_index():
     if file_path:
         response = send_request(entry_host.get(), int(entry_port.get()), f"LOAD_INDEX {file_path}\n")
         append_response(f"LOAD_INDEX Response:\n{response}\n\n")
+
+
 
 def on_print_index():
     term = entry_param.get()
@@ -112,6 +128,9 @@ btn_index_db = tk.Button(frame_buttons, text="INDEX_DB", command=on_index_db)
 btn_index_db.pack(side=tk.LEFT, padx=5)
 
 btn_add_file = tk.Button(frame_buttons, text="ADD_FILE", command=on_add_file)
+btn_add_file.pack(side=tk.LEFT, padx=5)
+
+btn_add_file = tk.Button(frame_buttons, text="ADD_FROM_DIRECTORY", command=on_add_directories)
 btn_add_file.pack(side=tk.LEFT, padx=5)
 
 btn_save_index = tk.Button(frame_buttons, text="SAVE_INDEX", command=on_save_index)
