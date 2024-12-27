@@ -162,10 +162,11 @@ private:
         while (running.load()) {
             {
                 std::unique_lock<std::mutex> lock(schedulerMutex);
-                schedulerCv.wait_for(lock, std::chrono::minutes(5)); // Run every 5 minutes
+                schedulerCv.wait_for(lock, std::chrono::seconds(30)); // Run every 5 minutes
                 if (!running.load()) break;
             }
-            index.buildIndexParallel(monitoredDirectories, 4, 0,10);
+            index.clearIndex();
+            index.buildIndexParallel(monitoredDirectories, 4, 0,100);
         }
     }
 
@@ -208,7 +209,7 @@ public:
     }
 
     void run(const std::string& host, int port) {
-        //schedulerThread = std::thread(&Server::runScheduler, this);
+        schedulerThread = std::thread(&Server::runScheduler, this);
 
         try {
             asio::io_context ioContext;
