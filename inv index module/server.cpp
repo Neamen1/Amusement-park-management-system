@@ -27,6 +27,10 @@ private:
     std::mutex schedulerMutex;
     std::condition_variable schedulerCv;
 
+    std::unordered_map<std::filesystem::path, std::filesystem::file_time_type> lastModified; //contains pairs of path:file_time_type of files to be tracked
+
+    std::mutex lastModifiedMutex;
+
     void handleClient(tcp::socket socket) {
         try {
             char data[1024];
@@ -73,6 +77,7 @@ private:
             stream >> connInfo;
 
             index.clearIndex();
+            monitorDirectories();
             return "OK|Index cleared\n";
         }
         else if (action == "INDEX_DB") {
@@ -118,27 +123,24 @@ private:
             stream >> term; // Спроба прочитати термін із запиту
             return index.printIndex(term);
         }
-        else if (action == "addDocsFromDirectories") {
+        else if (action == "addDocsFromDirectory") {
             std::string params;
             stream >> std::ws; // Skip whitespace
             std::getline(stream, params, '\n'); // Read the comma-separated parameters
 
             // Parse the comma-separated values
             size_t numThreads = 4; // Default
-            size_t startIdx = 0;
-            size_t endIdx = 10;
 
+            std::string directoryPath;
             try {
                 size_t pos1 = params.find(',');
-                size_t pos2 = params.find(',', pos1 + 1);
 
-                if (pos1 != std::string::npos && pos2 != std::string::npos) {
+                if (pos1 != std::string::npos) {
                     numThreads = std::stoul(params.substr(0, pos1));
-                    startIdx = std::stoul(params.substr(pos1 + 1, pos2 - pos1 - 1));
-                    endIdx = std::stoul(params.substr(pos2 + 1));
+                    directoryPath = params.substr(pos1 + 1);
                 }
                 else {
-                    return "ERROR|Invalid parameters format. Expected numThreads,startIdx,endIdx, got:" + params + "\n";
+                    return "ERROR|Invalid parameters format. Expected numThreads,dirPath, got:" + params + "\n";
                 }
             }
             catch (const std::exception& e) {
@@ -146,12 +148,12 @@ private:
             }
 
             // Validate parsed values
-            if (numThreads == 0 || startIdx > endIdx) {
-                return "ERROR|Invalid parameter values. Ensure numThreads > 0 and startIdx <= endIdx\n";
+            if (numThreads == 0) {
+                return "ERROR|Invalid parameter values. Ensure numThreads > 0\n";
             }
 
-            // Call the buildIndexParallel function
-            index.buildIndexParallel(monitoredDirectories, numThreads, startIdx, endIdx);
+            addAllFilenamesInDirectory(directoryPath, 2);       //fills lastModified with regular file pathes from directory
+            index.buildIndexParallel(lastModifiedMutex, lastModified, 4);
             return "OK|Indexing started\n";
         }
 
@@ -162,11 +164,10 @@ private:
         while (running.load()) {
             {
                 std::unique_lock<std::mutex> lock(schedulerMutex);
-                schedulerCv.wait_for(lock, std::chrono::seconds(30)); // Run every 5 minutes
+                schedulerCv.wait_for(lock, std::chrono::minutes(2)); // Run every 5 minutes
                 if (!running.load()) break;
             }
-            index.clearIndex();
-            index.buildIndexParallel(monitoredDirectories, 4, 0,100);
+            monitorDirectories(); // Відслідковуємо нові та змінені файли
         }
     }
 
@@ -198,6 +199,110 @@ private:
         PQclear(res);
         PQfinish(conn);
         return true;
+    }
+
+    //fills lastModified with regular file pathes from directory
+    void addAllFilenamesInDirectory(const std::string& directory, size_t numThreads) {
+
+        ThreadPool threadPoolFiles(numThreads);
+
+        for (const auto& entry : fs::directory_iterator(directory)) {
+            if(std::filesystem::is_regular_file(entry)){
+                threadPoolFiles.enqueue([this, path = entry.path()]() {
+                    std::ifstream file(path);
+                    if (file.is_open()) {
+                        std::unique_lock lock(lastModifiedMutex);
+                        lastModified[path] = std::filesystem::last_write_time(path);
+                    }
+                });
+            }
+        }
+    }
+
+    // fills lastModified map {path:file_time_type} with file pathes from specified directory within spceified index range (index taken from file name)
+    void addFilterFilenamesInDirectory(const std::string& directory,
+        size_t numThreads, const std::pair<size_t, size_t>& indexRanges) {
+
+        {
+            ThreadPool threadPoolFilterFiles(numThreads);
+            int file_amount = indexRanges.second - indexRanges.first;
+            for (const auto& entry : fs::directory_iterator(directory)) {
+                if (file_amount <= 0)
+                    break;
+
+                const std::string filename = entry.path().filename().string();
+
+                // Extract the sequence number before '_'
+                size_t underscorePos = filename.find('_');
+                if (underscorePos == std::string::npos) {
+                    continue; // Skip files with unexpected format
+                }
+
+                size_t sequenceNum;
+                try {
+                    sequenceNum = std::stoull(filename.substr(0, underscorePos));
+                }
+                catch (const std::exception&) {
+                    continue; // Skip files with invalid sequence number
+                }
+                // Check if the sequence number is within the desired range
+                if (sequenceNum >= indexRanges.first && sequenceNum < indexRanges.second) {
+                    --file_amount;
+                    threadPoolFilterFiles.enqueue([this, path=entry.path()]() {
+                        std::ifstream file(path);
+                        if (file.is_open()) {
+                            std::unique_lock lock(lastModifiedMutex);
+                            lastModified[path]= std::filesystem::last_write_time(path);
+                        }
+                    });
+                }
+            }
+            
+        }
+
+    }
+
+    void monitorDirectories() {
+        // lambda to execute only once to add files from directories
+        static bool once = [this]() {
+            //write filenames into lastModified to track files (within pair of indexes) from directory
+            for (const auto& dir : monitoredDirectories) {
+                //pair 4000, 4250 according to task; and 16000,17000 for unsup
+                if (dir == "G:\\OneDrive\\disk save\\uni\\7sem onedrive\\pis + kurs\\main fold\\inv index module\\Inverted index system\\x64\\Debug\\aclImdb\\train\\unsup") {
+                    addFilterFilenamesInDirectory(dir, 4, std::make_pair(16000, 17000));
+                }
+                else {
+                    addFilterFilenamesInDirectory(dir, 4, std::make_pair(4000, 4250));
+                }
+            }
+            index.buildIndexParallel(lastModifiedMutex, lastModified, 4);
+            return true;
+            } ();
+
+        //update tracked files
+        try {
+            std::unique_lock lock(lastModifiedMutex);
+
+            for (const auto& [path, lastMod] : lastModified) {
+                auto lastWriteTime = std::filesystem::last_write_time(path);
+
+                // Якщо файл змінений
+                if (lastMod != lastWriteTime) {
+                    std::ifstream file(path);
+                    if (file.is_open()) {
+                        std::ostringstream buffer;
+                        buffer << file.rdbuf();
+                        index.addDocument(/*docId=*/std::hash<std::string>{}(path.string()), buffer.str());
+                        lastModified[path] = lastWriteTime; // Оновлюємо час модифікації
+                        //std::cout << "Indexed file: " << path << std::endl;
+                    }
+                }
+            }
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Error monitoring: " << e.what() << std::endl;
+        }
+        
     }
 
 public:

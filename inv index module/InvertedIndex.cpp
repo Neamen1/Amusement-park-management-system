@@ -49,46 +49,43 @@ public:
             termFrequency[term]++;
         }
 
-        // Додавання термінів до індексу
+        // Add or update terms in the index
         std::unique_lock lock(mutex);
         for (const auto& [term, freq] : termFrequency) {
-            index[term].emplace_back(docId, freq);
+            auto& postings = index[term];
+
+            // Find if the document already exists in the postings list
+            auto it = std::find_if(postings.begin(), postings.end(),
+                [docId](const std::pair<int, int>& entry) {
+                    return entry.first == docId;
+                });
+
+            if (it != postings.end()) {
+                // Update the frequency if the document is already indexed
+                it->second = freq;
+            }
+            else {
+                // Add a new entry if the document is not in the index
+                postings.emplace_back(docId, freq);
+            }
         }
     }
 
+
     // Build the index in parallel for a number of files in range of indexes
-    void buildIndexParallel(const std::vector<std::string>& directories, size_t numThreads, size_t startIdx, size_t endIdx) {
+    void buildIndexParallel(std::mutex& lastModifiedMutex, 
+        const std::unordered_map<std::filesystem::path, std::filesystem::file_time_type>& lastModified, 
+        size_t numThreads) {
+
         ThreadPool threadPool(numThreads);
-
-        for (const auto& dir : directories) {
-            // find file with specified indexes
-            for (const auto& entry : fs::directory_iterator(dir)) {
-                const std::string filename = entry.path().filename().string();
-
-                // Extract the sequence number before '_'
-                size_t underscorePos = filename.find('_');
-                if (underscorePos == std::string::npos) {
-                    continue; // Skip files with unexpected format
+        for (const auto& [path, _] : lastModified) {
+            threadPool.enqueue([this, &path]() {
+                std::ifstream file(path);
+                if (file.is_open()) {
+                    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                    this->addDocument(/*docId=*/std::hash<std::string>{}(path.string()), content);
                 }
-
-                size_t sequenceNum;
-                try {
-                    sequenceNum = std::stoull(filename.substr(0, underscorePos));
-                }
-                catch (const std::exception&) {
-                    continue; // Skip files with invalid sequence number
-                }
-                // Check if the sequence number is within the desired range
-                if (sequenceNum >= startIdx && sequenceNum < endIdx) {
-                    threadPool.enqueue([this, sequenceNum, path = entry.path()]() {
-                        std::ifstream file(path);
-                        if (file.is_open()) {
-                            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                            this->addDocument(sequenceNum, content);
-                        }
-                        });
-                }
-            }
+            });
         }
     }
 
