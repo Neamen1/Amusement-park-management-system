@@ -1,3 +1,5 @@
+#pragma warning(disable : 4996)
+
 #include <iostream>
 #include <string>
 #include <thread>
@@ -7,6 +9,10 @@
 #include "InvertedIndex.cpp"
 #include <fstream>
 #include <libpq-fe.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <filesystem>
 
 using asio::ip::tcp;
 
@@ -14,6 +20,12 @@ class Server {
 private:
     InvertedIndex index;
     ThreadPool pool;
+
+    std::vector<std::string> monitoredDirectories;
+    std::atomic<bool> running; // To control scheduler's lifecycle
+    std::thread schedulerThread;
+    std::mutex schedulerMutex;
+    std::condition_variable schedulerCv;
 
     void handleClient(tcp::socket socket) {
         try {
@@ -106,8 +118,55 @@ private:
             stream >> term; // Спроба прочитати термін із запиту
             return index.printIndex(term);
         }
+        else if (action == "addDocsFromDirectories") {
+            std::string params;
+            stream >> std::ws; // Skip whitespace
+            std::getline(stream, params, '\n'); // Read the comma-separated parameters
+
+            // Parse the comma-separated values
+            size_t numThreads = 4; // Default
+            size_t startIdx = 0;
+            size_t endIdx = 10;
+
+            try {
+                size_t pos1 = params.find(',');
+                size_t pos2 = params.find(',', pos1 + 1);
+
+                if (pos1 != std::string::npos && pos2 != std::string::npos) {
+                    numThreads = std::stoul(params.substr(0, pos1));
+                    startIdx = std::stoul(params.substr(pos1 + 1, pos2 - pos1 - 1));
+                    endIdx = std::stoul(params.substr(pos2 + 1));
+                }
+                else {
+                    return "ERROR|Invalid parameters format. Expected numThreads,startIdx,endIdx, got:" + params + "\n";
+                }
+            }
+            catch (const std::exception& e) {
+                return std::string("ERROR|Failed to parse parameters: ") + e.what() + "\n";
+            }
+
+            // Validate parsed values
+            if (numThreads == 0 || startIdx > endIdx) {
+                return "ERROR|Invalid parameter values. Ensure numThreads > 0 and startIdx <= endIdx\n";
+            }
+
+            // Call the buildIndexParallel function
+            index.buildIndexParallel(monitoredDirectories, numThreads, startIdx, endIdx);
+            return "OK|Indexing started\n";
+        }
 
         return "ERROR|Unknown command\n";
+    }
+
+    void runScheduler() {
+        while (running.load()) {
+            {
+                std::unique_lock<std::mutex> lock(schedulerMutex);
+                schedulerCv.wait_for(lock, std::chrono::minutes(5)); // Run every 5 minutes
+                if (!running.load()) break;
+            }
+            index.buildIndexParallel(monitoredDirectories, 4, 0,10);
+        }
     }
 
     bool indexFromPostgres(const std::string& connInfo) {
@@ -141,10 +200,16 @@ private:
     }
 
 public:
-    Server(size_t threads) : pool(threads) {}
-    Server() : pool(4) {}
+    Server(size_t threads, const std::vector<std::string>& dirs) 
+        : pool(threads), monitoredDirectories(dirs), running(true) {}
+
+    ~Server() {
+        stopScheduler();
+    }
 
     void run(const std::string& host, int port) {
+        //schedulerThread = std::thread(&Server::runScheduler, this);
+
         try {
             asio::io_context ioContext;
             tcp::acceptor acceptor(ioContext, tcp::endpoint(tcp::v4(), port));
@@ -155,11 +220,19 @@ public:
 
                 pool.enqueue([this, socket]() mutable { // Capture shared_ptr instead of raw socket. Capturing the shared pointer (socket) by value ensures it stays alive even after the run function's scope exits.
                     handleClient(std::move(*socket));
-                    });
+                });
             }
         }
         catch (std::exception& e) {
             std::cerr << "Error starting server: " << e.what() << std::endl;
+        }
+    }
+
+    void stopScheduler() {
+        running.store(false);
+        schedulerCv.notify_all();
+        if (schedulerThread.joinable()) {
+            schedulerThread.join();
         }
     }
 };

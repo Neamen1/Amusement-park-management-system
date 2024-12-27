@@ -4,10 +4,21 @@
 //#include <libpq-fe.h> //test db conn
 
 int main() {
-    Server server(4); // Пул потоків із 4 потоків
+    /*std::vector<std::string> directories = {
+        "aclImdb/test/neg",
+        "aclImdb/test/pos",
+        "aclImdb/train/neg",
+        "aclImdb/train/pos",
+        "aclImdb/train/unsup"
+    };*/
+
+    std::vector<std::string> directories = {
+        "G:\\OneDrive\\disk save\\uni\\7sem onedrive\\pis + kurs\\main fold\\inv index module\\Inverted index system\\x64\\Debug\\aclImdb\\test\\neg"
+    };
+
+    Server server(4, directories); // Пул потоків із 4 потоків
     server.run("127.0.0.1", 8080);
     return 0;
-
 
     //test db conn
     /*PGconn* conn = PQconnectdb("user=admin password=1221 port=5432 dbname=amusement_database host=localhost");
