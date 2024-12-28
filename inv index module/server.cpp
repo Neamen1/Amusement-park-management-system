@@ -18,6 +18,7 @@ using asio::ip::tcp;
 
 class Server {
 private:
+public:
     InvertedIndex index;
     ThreadPool pool;
 
@@ -77,7 +78,6 @@ private:
             stream >> connInfo;
 
             index.clearIndex();
-            monitorDirectories();
             return "OK|Index cleared\n";
         }
         else if (action == "INDEX_DB") {
@@ -152,7 +152,7 @@ private:
                 return "ERROR|Invalid parameter values. Ensure numThreads > 0\n";
             }
 
-            addAllFilenamesInDirectory(directoryPath, 2);       //fills lastModified with regular file pathes from directory
+            addFilenamesFromDirectory(directoryPath, 250, 2);       //fills lastModified with regular file pathes from directory
             index.buildIndexParallel(lastModifiedMutex, lastModified, 4);
             return "OK|Indexing started\n";
         }
@@ -202,12 +202,14 @@ private:
     }
 
     //fills lastModified with regular file pathes from directory
-    void addAllFilenamesInDirectory(const std::string& directory, size_t numThreads) {
+    void addFilenamesFromDirectory(const std::string& directory, size_t max_files, size_t numThreads) {
 
         ThreadPool threadPoolFiles(numThreads);
-
+        size_t count = 0;
         for (const auto& entry : fs::directory_iterator(directory)) {
             if(std::filesystem::is_regular_file(entry)){
+                if (++count >= max_files) break;
+
                 threadPoolFiles.enqueue([this, path = entry.path()]() {
                     std::ifstream file(path);
                     if (file.is_open()) {
@@ -305,7 +307,7 @@ private:
         
     }
 
-public:
+
     Server(size_t threads, const std::vector<std::string>& dirs) 
         : pool(threads), monitoredDirectories(dirs), running(true) {}
 
@@ -319,6 +321,8 @@ public:
         try {
             asio::io_context ioContext;
             tcp::acceptor acceptor(ioContext, tcp::endpoint(tcp::v4(), port));
+
+            monitorDirectories(); // Відслідковуємо нові та змінені файли
 
             while (true) {
                 auto socket = std::make_shared<tcp::socket>(ioContext); // Use shared_ptr for socket
