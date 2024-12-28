@@ -50,13 +50,13 @@ def on_add_file():
 
 def on_add_directories():
     dir_path = filedialog.askdirectory()
-    num_threads = entry_param.get()
-
+    num_files_threads = entry_param.get()
+    num_threads,num_files = num_files_threads.split(",")
     # Validate the input format
-    if not re.fullmatch(r"\d+", num_threads):
-        messagebox.showwarning("Invalid Input", "Input must be in the format 'numThreads', where first is a non-negative integer")
+    if not re.fullmatch(r"\d+,\d+", num_files_threads):
+        messagebox.showwarning("Invalid Input", "Input must be in the format 'numThreads,num_files', where first is a non-negative integer")
         return
-    response = send_request(entry_host.get(), int(entry_port.get()), f"addDocsFromDirectory {num_threads},{dir_path}\n")
+    response = send_request(entry_host.get(), int(entry_port.get()), f"addDocsFromDirectory {num_threads},{num_files},{dir_path}\n")
     append_response(f"addDocsFromDirectory Response:\n{response}\n\n")
 
 def on_save_index():
